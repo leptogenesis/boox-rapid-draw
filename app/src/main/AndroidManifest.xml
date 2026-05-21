@@ -26,6 +26,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+    	    android:name=".OverlayRegionSettingsActivity"
+    	    android:label="Overlay Region Settings"
+            android:exported="false"
+            android:theme="@style/Theme.AppCompat.Light"/>
         <service android:name=".OverlayShowingService" android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="This app needs to be able to display itself over other APPs to emulate quick draw."/>

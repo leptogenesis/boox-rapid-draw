@@ -1,10 +1,10 @@
 package com.sergeylappo.booxrapiddraw
-
 import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
 import android.graphics.Color
@@ -22,6 +22,9 @@ import android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
 import android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
 import android.view.WindowManager.LayoutParams.MATCH_PARENT
 import android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+import android.widget.Button
+import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -39,6 +42,7 @@ class OverlayShowingService : Service() {
     private lateinit var touchHelper: TouchHelper
     private lateinit var wm: WindowManager
     private lateinit var overlayPaintingView: SurfaceView
+    private var settingsOverlayView: View? = null
 
     override fun onBind(intent: Intent) = null
 
@@ -54,18 +58,138 @@ class OverlayShowingService : Service() {
         initPaint()
         initSurfaceView()
     }
+    private fun showSettingsOverlay() {
+        Toast.makeText(this, "showSettingsOverlay called", Toast.LENGTH_SHORT).show()
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == "STOP") {
-            Toast.makeText(this, "Terminating Rapid Draw Service...", Toast.LENGTH_SHORT).show()
-            stopSelf()
-            return START_NOT_STICKY // Prevents service from being recreated
+        if (settingsOverlayView != null) {
+            Toast.makeText(this, "already showing", Toast.LENGTH_SHORT).show()
+            return
         }
 
-        Toast.makeText(this, "Starting Rapid Draw Service", Toast.LENGTH_SHORT).show()
-        return START_STICKY // Service will be recreated if killed
+        try {
+            val dm = resources.displayMetrics
+            val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+            val left = prefs.getInt(PREF_LEFT, 0)
+            val top = prefs.getInt(PREF_TOP, 50)
+            val right = prefs.getInt(PREF_RIGHT, dm.widthPixels)
+            val bottom = prefs.getInt(PREF_BOTTOM, dm.heightPixels - 10)
+
+            Toast.makeText(this, "region: $left $top $right $bottom", Toast.LENGTH_SHORT).show()
+
+            val regionView = RegionSelectorView(
+                this,
+                RectF(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat())
+            )
+
+            val saveButton = Button(this).apply {
+                text = "Save"
+                setOnClickListener {
+                    val r = regionView.getRegion()
+                    prefs.edit()
+                        .putInt(PREF_LEFT, r.left.toInt())
+                        .putInt(PREF_TOP, r.top.toInt())
+                        .putInt(PREF_RIGHT, r.right.toInt())
+                        .putInt(PREF_BOTTOM, r.bottom.toInt())
+                        .apply()
+                    dismissSettingsOverlay()
+                    Toast.makeText(
+                        this@OverlayShowingService,
+                        "Region saved.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+
+            val cancelButton = Button(this).apply {
+                text = "Cancel"
+                setOnClickListener { dismissSettingsOverlay() }
+            }
+
+            val buttonRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+                setBackgroundColor(Color.TRANSPARENT)
+
+                val saveParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+                saveParams.marginEnd = 16
+
+                val cancelParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+
+                addView(saveButton, saveParams)
+                addView(cancelButton, cancelParams)
+            }
+
+            val container = FrameLayout(this).apply {
+                setBackgroundColor(Color.TRANSPARENT)
+                addView(
+                    regionView,
+                    FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT
+                    )
+                )
+                addView(
+                    buttonRow,
+                    FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                    ).apply { bottomMargin = 20 }
+                )
+            }
+
+            val params = WindowManager.LayoutParams().apply {
+                width = MATCH_PARENT
+                height = MATCH_PARENT
+                type = TYPE_APPLICATION_OVERLAY
+                format = PixelFormat.TRANSLUCENT
+                flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                gravity = Gravity.START or Gravity.TOP
+                x = 0
+                y = 0
+            }
+            Toast.makeText(this, "adding view to wm", Toast.LENGTH_SHORT).show()
+            settingsOverlayView = container
+            wm.addView(container, params)
+            Toast.makeText(this, "view added successfully", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "ERROR: ${e.message}", Toast.LENGTH_LONG).show()
+        }
     }
 
+    private fun dismissSettingsOverlay() {
+        settingsOverlayView?.let {
+            wm.removeViewImmediate(it)
+            settingsOverlayView = null
+        }
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            "STOP" -> {
+                Toast.makeText(this, "Terminating Rapid Draw Service...", Toast.LENGTH_SHORT).show()
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            "SETTINGS" -> {
+                showSettingsOverlay()
+                return START_STICKY
+            }
+            else -> {
+                Toast.makeText(this, "Starting Rapid Draw Service", Toast.LENGTH_SHORT).show()
+                return START_STICKY
+            }
+        }
+    }
     private fun createForegroundNotification() {
         val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
 
@@ -85,11 +209,21 @@ class OverlayShowingService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val settingsPendingIntent = PendingIntent.getService(
+            this,
+            1,
+            Intent(this, OverlayShowingService::class.java).apply { action = "SETTINGS" },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.overlay_service_notification_content_title))
             .setContentText(getString(R.string.overlay_service_notification_content))
             .setSmallIcon(R.drawable.rapid_draw)
             .addAction(NotificationCompat.Action.Builder(null, "Stop", pendingIntent).build())
+            .addAction(
+                NotificationCompat.Action.Builder(null, "Settings", settingsPendingIntent).build()
+            )
             .build()
 
         //noinspection InlinedApi (Seems to work, IDK why, maybe older Android versions might not support this)
@@ -102,25 +236,17 @@ class OverlayShowingService : Service() {
         overlayPaintingView.holder.setFormat(PixelFormat.TRANSPARENT)
         overlayPaintingView.alpha = 1.0f
 
-        val topLeftParams = WindowManager.LayoutParams(
-            MATCH_PARENT,
-            MATCH_PARENT,
-            TYPE_APPLICATION_OVERLAY,
-            FLAG_NOT_FOCUSABLE or FLAG_NOT_TOUCHABLE,
-            PixelFormat.TRANSPARENT
-        )
-        topLeftParams.alpha = 0.2f
-        topLeftParams.gravity = Gravity.START or Gravity.TOP
+        val params = WindowManager.LayoutParams().apply {
+            width = MATCH_PARENT
+            height = MATCH_PARENT
+            type = TYPE_APPLICATION_OVERLAY
+            format = PixelFormat.TRANSLUCENT
+            flags = FLAG_NOT_FOCUSABLE or FLAG_NOT_TOUCHABLE
+            alpha = 0.2f
+            gravity = Gravity.START or Gravity.TOP
+        }
 
-        //        TODO this is duplicated
-        //        TODO actual bottom place is calculated incorrectly due to the status bar...
-        val displayMetrics = resources.displayMetrics
-        val bounds = Rect(0, 0, displayMetrics.widthPixels, displayMetrics.heightPixels)
-
-        topLeftParams.x = bounds.left
-        topLeftParams.y = bounds.top
-
-        wm.addView(overlayPaintingView, topLeftParams)
+        wm.addView(overlayPaintingView, params)
     }
 
     private fun initPaint() {
@@ -147,12 +273,21 @@ class OverlayShowingService : Service() {
                 oldRight: Int,
                 oldBottom: Int
             ) {
-                val bounds = Rect(0, 0, right, bottom)
-                overlayPaintingView.getLocalVisibleRect(bounds)
+                val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                val dm = resources.displayMetrics
+	
+                // Load saved region, defaulting to full screen minus top 50 and bottom 10
+                val rLeft = prefs.getInt(PREF_LEFT, 0)
+                val rTop = prefs.getInt(PREF_TOP, 50)
+                val rRight = prefs.getInt(PREF_RIGHT, dm.widthPixels)
+                val rBottom = prefs.getInt(PREF_BOTTOM, dm.heightPixels - 10)
+	
+                val limitRect = Rect(rLeft, rTop, rRight, rBottom)
+	
                 touchHelper.setStrokeColor(Color.BLACK)
                 touchHelper.setStrokeStyle(TouchHelper.STROKE_STYLE_PENCIL)
                 touchHelper.openRawDrawing()
-                touchHelper.setStrokeWidth(STROKE_WIDTH).setLimitRect(bounds, listOf())
+                touchHelper.setStrokeWidth(STROKE_WIDTH).setLimitRect(limitRect, listOf())
                 touchHelper.setRawInputReaderEnable(!touchHelper.isRawDrawingInputEnabled)
                 overlayPaintingView.addOnLayoutChangeListener(this)
             }
