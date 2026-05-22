@@ -77,15 +77,33 @@ class OverlayShowingService : Service() {
 
             Toast.makeText(this, "region: $left $top $right $bottom", Toast.LENGTH_SHORT).show()
 
+// In showSettingsOverlay(), when constructing RegionSelectorView:
+            val statusBarHeight: Int = resources
+                .getIdentifier("status_bar_height", "dimen", "android")
+                .takeIf { it > 0 }
+                ?.let { resources.getDimensionPixelSize(it) }
+                ?: 0
+
             val regionView = RegionSelectorView(
                 this,
-                RectF(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat())
+                RectF(
+                    left.toFloat(),
+                    top.toFloat(),
+                    right.toFloat(),
+                    bottom.toFloat()
+                )
             )
 
             val saveButton = Button(this).apply {
                 text = "Save"
                 setOnClickListener {
                     val r = regionView.getRegion()
+                    val statusBarHeight: Int = resources
+                        .getIdentifier("status_bar_height", "dimen", "android")
+                        .takeIf { it > 0 }
+                        ?.let { resources.getDimensionPixelSize(it) }
+                        ?: 0
+
                     prefs.edit()
                         .putInt(PREF_LEFT, r.left.toInt())
                         .putInt(PREF_TOP, r.top.toInt())
@@ -140,8 +158,8 @@ class OverlayShowingService : Service() {
                     FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.WRAP_CONTENT,
                         FrameLayout.LayoutParams.WRAP_CONTENT,
-                        Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-                    ).apply { bottomMargin = 20 }
+                        Gravity.CENTER
+                    )
                 )
             }
 
@@ -151,16 +169,23 @@ class OverlayShowingService : Service() {
                 type = TYPE_APPLICATION_OVERLAY
                 format = PixelFormat.TRANSLUCENT
                 flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 gravity = Gravity.START or Gravity.TOP
                 x = 0
                 y = 0
             }
-            Toast.makeText(this, "adding view to wm", Toast.LENGTH_SHORT).show()
+            // Toast.makeText(this, "adding view to wm", Toast.LENGTH_SHORT).show()
             settingsOverlayView = container
             wm.addView(container, params)
-            Toast.makeText(this, "view added successfully", Toast.LENGTH_SHORT).show()
+            // Close the notification shade so it doesn't stay open on top
+            @Suppress("DEPRECATION")
+// Close the notification shade so it doesn't stay open on top
+            startActivity(
+                Intent(this, DismissNotificationActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+            )
+            // Toast.makeText(this, "view added successfully", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(this, "ERROR: ${e.message}", Toast.LENGTH_LONG).show()
         }
@@ -209,10 +234,13 @@ class OverlayShowingService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val settingsPendingIntent = PendingIntent.getService(
+        val settingsPendingIntent = PendingIntent.getActivity(
             this,
             1,
-            Intent(this, OverlayShowingService::class.java).apply { action = "SETTINGS" },
+            Intent(this, DismissNotificationActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                putExtra("action", "SETTINGS")
+            },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
@@ -275,6 +303,54 @@ class OverlayShowingService : Service() {
             ) {
                 val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 val dm = resources.displayMetrics
+
+                val rLeft = prefs.getInt(PREF_LEFT, 0)
+                val rTop = prefs.getInt(PREF_TOP, 50)
+                val rRight = prefs.getInt(PREF_RIGHT, dm.widthPixels)
+                val rBottom = prefs.getInt(PREF_BOTTOM, dm.heightPixels - 10)
+
+                val statusBarHeight: Int = resources
+                    .getIdentifier("status_bar_height", "dimen", "android")
+                    .takeIf { it > 0 }
+                    ?.let { resources.getDimensionPixelSize(it) }
+                    ?: 0
+
+                // Toast.makeText(
+                //    this@OverlayShowingService,
+                //    "view: l=$left t=$top r=$right b=$bottom\n" +
+                //        "saved: l=$rLeft t=$rTop r=$rRight b=$rBottom\n" +
+                //        "statusBar=$statusBarHeight screen=${dm.widthPixels}x${dm.heightPixels}",
+                //    Toast.LENGTH_LONG
+                // ).show()
+
+                val verticalOffset = dm.heightPixels - (bottom - top)
+
+                val limitRect = Rect(
+                    rLeft,
+                    rTop - verticalOffset,
+                    rRight,
+                    rBottom - verticalOffset
+                )
+                touchHelper.setStrokeColor(Color.BLACK)
+                touchHelper.setStrokeStyle(TouchHelper.STROKE_STYLE_PENCIL)
+                touchHelper.openRawDrawing()
+                touchHelper.setStrokeWidth(STROKE_WIDTH).setLimitRect(limitRect, listOf())
+                touchHelper.setRawInputReaderEnable(!touchHelper.isRawDrawingInputEnabled)
+                overlayPaintingView.addOnLayoutChangeListener(this)
+            }
+/*            override fun onLayoutChange(
+                v: View,
+                left: Int,
+                top: Int,
+                right: Int,
+                bottom: Int,
+                oldLeft: Int,
+                oldTop: Int,
+                oldRight: Int,
+                oldBottom: Int
+            ) {
+                val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                val dm = resources.displayMetrics
 	
                 // Load saved region, defaulting to full screen minus top 50 and bottom 10
                 val rLeft = prefs.getInt(PREF_LEFT, 0)
@@ -282,7 +358,18 @@ class OverlayShowingService : Service() {
                 val rRight = prefs.getInt(PREF_RIGHT, dm.widthPixels)
                 val rBottom = prefs.getInt(PREF_BOTTOM, dm.heightPixels - 10)
 	
-                val limitRect = Rect(rLeft, rTop, rRight, rBottom)
+                val statusBarHeight: Int = resources
+                    .getIdentifier("status_bar_height", "dimen", "android")
+                    .takeIf { it > 0 }
+                    ?.let { resources.getDimensionPixelSize(it) }
+                    ?: 0
+
+                val limitRect = Rect(
+                    rLeft,
+                    rTop + statusBarHeight,
+                    rRight,
+                    rBottom + statusBarHeight
+                )
 	
                 touchHelper.setStrokeColor(Color.BLACK)
                 touchHelper.setStrokeStyle(TouchHelper.STROKE_STYLE_PENCIL)
@@ -291,6 +378,7 @@ class OverlayShowingService : Service() {
                 touchHelper.setRawInputReaderEnable(!touchHelper.isRawDrawingInputEnabled)
                 overlayPaintingView.addOnLayoutChangeListener(this)
             }
+*/
         })
 
         overlayPaintingView.setOnTouchListener { _: View?, _: MotionEvent? -> true }

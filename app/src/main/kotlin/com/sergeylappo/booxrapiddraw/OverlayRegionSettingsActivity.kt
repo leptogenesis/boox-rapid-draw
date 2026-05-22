@@ -127,13 +127,21 @@ class RegionSelectorView(context: Context, private var region: RectF) : View(con
             style = Paint.Style.FILL
         }
 
-        // Draw dim only outside the selected region
+        // Draw darker dim outside the selected region
         canvas.drawRect(0f, 0f, width.toFloat(), region.top, dimPaint)
         canvas.drawRect(0f, region.bottom, width.toFloat(), height.toFloat(), dimPaint)
         canvas.drawRect(0f, region.top, region.left, region.bottom, dimPaint)
         canvas.drawRect(region.right, region.top, width.toFloat(), region.bottom, dimPaint)
 
-        // Draw region border only - no fill so underlying app is fully visible
+        // Draw slight dim inside the selected region so it's visually distinct
+        val selectedDimPaint = Paint().apply {
+            color = Color.WHITE
+            alpha = 30
+            style = Paint.Style.FILL
+        }
+        canvas.drawRect(region, selectedDimPaint)
+
+        // Draw region border
         canvas.drawRect(region, borderPaint)
 
         // Draw corner handles
@@ -161,6 +169,7 @@ class RegionSelectorView(context: Context, private var region: RectF) : View(con
         )
     }
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.getToolType(0) == MotionEvent.TOOL_TYPE_STYLUS) return false
         val x = event.x
         val y = event.y
 
